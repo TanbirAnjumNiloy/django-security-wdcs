@@ -1,0 +1,40 @@
+{
+  "security_level": "full",
+  "xss": {
+    "attack_class": "Reflected XSS",
+    "payload": "<script>alert(document.cookie)</script>",
+    "http_status": 200,
+    "script_tag_reflected_unescaped": false,
+    "outcome": "Secured",
+    "response_body": "alert(document.cookie)"
+  },
+  "csrf": {
+    "attack_class": "CSRF",
+    "payload": "POST with no CSRF token/cookie",
+    "http_status": 403,
+    "outcome": "Secured"
+  },
+  "sqli": {
+    "attack_class": "SQL Injection",
+    "payload": "' OR '1'='1' --",
+    "http_status": 200,
+    "match_found": false,
+    "outcome": "Secured (no matching record)",
+    "raw_response": {
+      "match_found": false,
+      "row_count": 0
+    }
+  },
+  "clickjacking": {
+    "attack_class": "Clickjacking",
+    "x_frame_options_header": "DENY",
+    "content_security_policy_header": "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'",
+    "outcome": "Secured (frame blocked)"
+  },
+  "data_at_rest": {
+    "attack_class": "Data-at-rest exposure",
+    "secret_written": "SENSITIVE-TEST-VALUE-42",
+    "raw_db_bytes": "gAAAAABqkeqw5k_-fzrI76R8aNjKKJyKJsMm7lLlS0py1LtT5GILpy7LMOqjuS3Q5Bub3_7ZmXw0LMgzMOhpJ0i2_KiLG5GQ27fc77ju6q_HRaZlZvQxc9s=",
+    "outcome": "Secured (ciphertext only)"
+  }
+}
