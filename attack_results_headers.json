@@ -1,0 +1,43 @@
+{
+  "security_level": "headers",
+  "xss": {
+    "attack_class": "Reflected XSS",
+    "payload": "<script>alert(document.cookie)</script>",
+    "http_status": 200,
+    "script_tag_reflected_unescaped": true,
+    "outcome": "Vulnerable",
+    "response_body": "<script>alert(document.cookie)</script>"
+  },
+  "csrf": {
+    "attack_class": "CSRF",
+    "payload": "POST with no CSRF token/cookie",
+    "http_status": 403,
+    "outcome": "Secured"
+  },
+  "sqli": {
+    "attack_class": "SQL Injection",
+    "payload": "' OR '1'='1' --",
+    "seed_http_status": 200,
+    "control_row_count": 1,
+    "http_status": 200,
+    "match_found": false,
+    "payload_row_count": 0,
+    "outcome": "Secured (payload returned 0 rows; positive control passed)",
+    "raw_response": {
+      "match_found": false,
+      "row_count": 0
+    }
+  },
+  "clickjacking": {
+    "attack_class": "Clickjacking",
+    "x_frame_options_header": "DENY",
+    "content_security_policy_header": "style-src 'self'; script-src 'self'; default-src 'self'; frame-ancestors 'none'",
+    "outcome": "Secured (frame blocked)"
+  },
+  "data_at_rest": {
+    "attack_class": "Data-at-rest exposure",
+    "secret_written": "SENSITIVE-TEST-VALUE-42",
+    "raw_db_bytes": "SENSITIVE-TEST-VALUE-42",
+    "outcome": "Vulnerable (plaintext visible)"
+  }
+}
