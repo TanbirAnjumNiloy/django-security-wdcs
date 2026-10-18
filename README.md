@@ -1,135 +1,129 @@
-# Reproducible test kit for "Web Security Enhancement in Django"
+# django-security-wdcs
 
-This is a runnable companion to the paper. It regenerates **Table 2**
-(Empirical Results) and **Table 3** (Performance Overhead) with real,
-scripted, re-runnable measurements, instead of the illustrative
-estimates the current draft honestly (and correctly) flags as
-non-reproducible.
+Reproducible test kit for the paper *"WDCS Revisited: A Weight-Robust, Verifiable Coverage Metric for Tracking Django Security Posture"*.
 
-It is built to run on **your own machine**, where you already have
-Python and can install packages (Django must be installed, so internet
-access is needed for the first setup).
+It contains a small, deliberately vulnerable Django project that can run in four hardening configurations, scripts that attack each configuration and record the outcome, a script that turns those outcomes into WDCS scores, and the sensitivity-analysis scripts used in the paper.
+
+> The Django app in this repository is intentionally insecure at the `baseline` level. It is a local test target only. Do not deploy it.
+
+## What reproduces which paper table
+
+| Paper table | How to reproduce | Output |
+|---|---|---|
+| Table 6 (attack-test outcomes) | `scripts/run_attack_tests.py`, once per level | `attack_results_<level>.json` |
+| Tables 7 and 8 (coverage and WDCS) | `scripts/compute_wdcs.py` on the four JSON files | printed table |
+| Table 9 (latency, exploratory) | `scripts/benchmark_latency.py`, once per level | printed rows |
+| Tables 3 and 4 (weight sensitivity, CI gates) | `scripts/wdcs_sensitivity.py`, `scripts/wdcs_tradeoff_sensitivity.py` | printed tables |
+| Table 5 (synthetic trade-off scenarios) | `scripts/wdcs_tradeoff_sensitivity.py` | printed table |
+
+## Layout
+
+```
+scripts/run_attack_tests.py          attack tests (XSS, CSRF, SQLi, clickjacking, data-at-rest)
+scripts/compute_wdcs.py              WDCS from the four attack_results_*.json files
+scripts/benchmark_latency.py         exploratory latency measurement (GET /ping/)
+scripts/wdcs_sensitivity.py          Monte Carlo weight perturbation on the measured layers
+scripts/wdcs_tradeoff_sensitivity.py synthetic trade-off scenarios and CI-gate analysis
+secapp/, testproject/, manage.py     the Django test project
+attack_results_*.json                raw outputs of run_attack_tests.py for the four levels
+```
 
 ## 1. Setup (once)
 
-```bash
-cd django_test_kit
-python3 -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
+Windows (cmd):
+
+```
+python -m venv venv
+venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Record these three lines for the paper's methodology section. A
-reviewer asking "which Python/Django version, which OS" should get an
-exact answer:
+macOS / Linux:
 
-```bash
+```
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+Record the environment used for a run:
+
+```
 python --version
 python -c "import django; print(django.get_version())"
 python -c "import platform; print(platform.platform())"
 ```
 
-## 2. Run one configuration at a time
+The paper's runs used Python 3.10.0, Django 5.0.14, Windows 10 build 10.0.22631 (AMD64), SQLite.
 
-Each of the paper's four configuration rows (baseline / headers /
-sanitization / full) is a **separate server run** with a different
-`SECURITY_LEVEL`. Because the `full` level changes a model field type
-(plain `TextField` → `EncryptedTextField`), reset the database and
-migrations between different levels:
+## 2. Run one configuration level
 
-```bash
-# --- reset before switching levels ---
-rm -f db.sqlite3
-rm -f secapp/migrations/0*.py
+There are four levels, selected by the `SECURITY_LEVEL` environment variable: `baseline`, `headers`, `sanitization`, `full`. The `full` level changes a model field type, so reset the database and migrations before each level.
 
-# --- pick ONE level, then migrate + run ---
-export SECURITY_LEVEL=baseline        # or headers / sanitization / full
+Windows (cmd), terminal 1:
+
+```
+del db.sqlite3
+del secapp\migrations\0*.py
+set SECURITY_LEVEL=baseline
 python manage.py makemigrations secapp
 python manage.py migrate
 python manage.py runserver 8001
 ```
 
-Leave that server running in one terminal for the rest of this section.
+macOS / Linux, terminal 1:
 
-## 3. Reproduce Table 3 (latency) for this level
+```
+rm -f db.sqlite3 secapp/migrations/0*.py
+export SECURITY_LEVEL=baseline
+python manage.py makemigrations secapp
+python manage.py migrate
+python manage.py runserver 8001
+```
 
-In a second terminal, same venv:
+Leave the server running. In a second terminal (same virtual environment, same folder):
 
-```bash
+```
+python scripts/run_attack_tests.py --level baseline --url http://127.0.0.1:8001 --db <absolute path to db.sqlite3>
+```
+
+On Windows use backslashes and a full path, for example `--db C:\path\to\repo\db.sqlite3`. The result is saved as `attack_results_baseline.json`. Stop the server (Ctrl+C), then repeat this section for `headers`, `sanitization`, and `full`, changing the level name in both terminals.
+
+Optional, for Table 9 (use the same `--n` for every level):
+
+```
 python scripts/benchmark_latency.py --level baseline --n 200
 ```
 
-This prints the environment block, mean/median/stdev latency over `n`
-real HTTP requests to `/ping/`, and a ready-to-paste table row. Use the
-same `--n` for all four levels so the comparison is apples-to-apples;
-200–500 is reasonable for a laptop-scale benchmark. If you want a
-heavier, industry-standard load tool instead of this script, `wrk` or
-`locust` work too. Just record the tool name, concurrency, and duration
-you used, the same way this script records `n`.
+## 3. Compute WDCS from the results
 
-## 4. Reproduce Table 2 (attack outcomes) for this level
-
-Same terminal:
-
-```bash
-python scripts/run_attack_tests.py --level baseline \
-    --url http://127.0.0.1:8001 --db "$(pwd)/db.sqlite3"
+```
+python scripts/compute_wdcs.py attack_results_baseline.json attack_results_headers.json attack_results_sanitization.json attack_results_full.json
 ```
 
-This actually sends the exact payloads from Table 2
-(`<script>alert(document.cookie)</script>`, a token-less forged POST,
-`' OR '1'='1' --`, a clickjacking header check, and a direct raw-SQLite
-read of a written secret) and reports a real Vulnerable/Secured outcome
-per class, saved to `attack_results_<level>.json`.
+The script refuses to score a result whose outcome is `INCONCLUSIVE` or `ERROR` instead of silently counting it as unprotected.
 
-**Note on scope:** this kit exercises 5 of the paper's 6 Table 2 rows
-(XSS, CSRF, SQLi, Clickjacking, Data-at-rest exposure). Privilege
-escalation / access control needs a real authenticated-session flow to
-test honestly, so it is left out rather than faked. It is the natural
-next extension: add a login flow and an object-ownership check, then a
-matching test function.
+## 4. Sensitivity analysis (paper Section 4.4)
 
-## 5. Repeat for all four levels
+Python standard library only, fixed seeds.
 
-Stop the server (Ctrl+C), then repeat steps 2–4 for `headers`,
-`sanitization`, then `full`. You'll end up with four
-`attack_results_*.json` files and four latency printouts, which are the
-real data for Table 2 and Table 3.
-
-## 6. Recompute WDCS from the real results
-
-```bash
-python scripts/compute_wdcs.py \
-    attack_results_baseline.json attack_results_headers.json \
-    attack_results_sanitization.json attack_results_full.json
+```
+python scripts/wdcs_sensitivity.py
+python scripts/wdcs_tradeoff_sensitivity.py
 ```
 
-This replaces the paper's illustrative Ci/WDCS worked example with
-scores computed from what your server actually did, for the 5 classes
-this kit measures.
+`wdcs_sensitivity.py` perturbs the severity weights on the four measured layers. `wdcs_tradeoff_sensitivity.py` also analyses three **synthetic** trade-off scenarios; those are illustrations of the scoring function, not attack-test results.
 
-## 7. What to change in the paper afterward
+## What each attack test measures
 
-- **Table 3:** replace the four latency rows with your printed
-  mean ± stdev, and add the environment block (Python/Django version,
-  OS, CPU, `n`) either inline or as a footnote.
-- **Table 2:** replace the qualitative Vulnerable/Secured cells with
-  your real outcomes, and cite the payload + HTTP status/response you
-  observed. The JSON files are your raw evidence; keep them as
-  supplementary material if the venue allows it.
-- **WDCS worked example:** either keep it as a labeled illustrative
-  example (make sure the paper says so explicitly) or replace it with
-  the real per-class Ci from `compute_wdcs.py`, and say which one you
-  did.
-- **Methodology disclosure:** remove or rewrite the "Methodology
-  disclosure" and the CSRF/SQLi parenthetical notes that currently say
-  the numbers are estimates. Once you've run this kit they're not
-  estimates anymore, so the note should describe the real methodology
-  (tool, trial count, environment) instead of disclaiming it.
+* **XSS**: whether the payload is reflected unescaped in the response body. It does not execute the script in a browser, so a Content-Security-Policy header does not change this result.
+* **CSRF**: whether a POST with no CSRF token or cookie is rejected (HTTP 403).
+* **SQL injection**: seed-then-inject. The test writes a known row through the app, confirms that a normal lookup finds it (positive control), then sends `' OR '1'='1' --`. If the seed or the control fails, the outcome is `INCONCLUSIVE`. An earlier version injected into an empty table and so reported "Secured" at every level; this version replaced it.
+* **Clickjacking**: whether `X-Frame-Options` or a CSP `frame-ancestors` directive is present.
+* **Data-at-rest**: a basic check that the stored value is not plaintext in the raw SQLite file. It does not assess key management, key storage, or operational security.
 
-## Sensitivity analysis (paper Section 4.4)
+## Scope and limits
 
-```bash
-python scripts/wdcs_sensitivity.py            # measured layers (Table 3)
-python scripts/wdcs_tradeoff_sensitivity.py   # trade-off scenarios and CI gates (Tables 4-5)
-```
+* Access control and privilege escalation are not tested; doing so needs an authenticated multi-user workflow (see paper Section 4.8).
+* Latency numbers come from a single local development server and are exploratory, not an overhead estimate.
+* The coverage values are binary (one end-to-end attack per class), not per-control fractions.
